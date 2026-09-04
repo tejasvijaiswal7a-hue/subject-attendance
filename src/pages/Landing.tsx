@@ -10,10 +10,10 @@ const fadeUp = {
 
 /** Static preview of the subject list, shown on the landing page. */
 const PREVIEW_ROWS = [
-  { name: "Data Structures", code: "CS 401", section: "Section A", percent: "92%", status: "present" },
-  { name: "Design & Analysis of Algorithms", code: "CS 403", section: "Section A", percent: "88%", status: "present" },
-  { name: "Operating Systems", code: "CS 501", section: "Section B", percent: "76%", status: "absent" },
-  { name: "Computer Networks", code: "CS 502", section: "Section B", percent: "100%", status: "present" },
+  { name: "Engineering Physics", code: "L/PHY1001/STM", section: "Lecture", percent: "92%", status: "present" },
+  { name: "Engineering Mathematics I", code: "L/MTH1101/SR", section: "Lecture", percent: "88%", status: "present" },
+  { name: "Physics Laboratory", code: "LAB/PHY1051/RJR", section: "Lab", percent: "76%", status: "absent" },
+  { name: "Basic Electronics", code: "L/ECE1001/AMD", section: "Lecture", percent: "100%", status: "present" },
 ] as const;
 
 export default function Landing() {
@@ -123,7 +123,7 @@ export default function Landing() {
             ))}
           </div>
           <p className="mt-4 text-center text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-            Sections A &amp; B · attendance history per subject
+            Groups A &amp; B · analysis and history per subject
           </p>
         </motion.div>
       </section>

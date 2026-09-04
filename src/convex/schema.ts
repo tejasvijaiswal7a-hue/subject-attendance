@@ -30,14 +30,15 @@ const schema = defineSchema(
       isAnonymous: v.optional(v.boolean()), // is the user anonymous. do not remove
 
       role: v.optional(roleValidator), // role of the user. do not remove
+      group: v.optional(v.union(v.literal("A"), v.literal("B"))), // student group, chosen at first sign-in
     }).index("email", ["email"]), // index for the email. do not remove or modify
 
     // Fixed set of subjects students mark attendance for.
     subjects: defineTable({
-      name: v.string(), // subject name, e.g. "Data Structures"
-      code: v.string(), // subject code, e.g. "CS 402"
-      section: v.string(), // class section, e.g. "Section A"
-      order: v.number(), // display order within the section
+      name: v.string(), // readable subject name, e.g. "Engineering Physics"
+      code: v.string(), // class code as printed on the timetable, e.g. "L/PHY1001/STM"
+      category: v.string(), // Lecture | Lab | Tutorial | Sessions
+      order: v.number(), // display order within the timetable
     }).index("by_order", ["order"]),
 
     // One row per student, subject, and day.

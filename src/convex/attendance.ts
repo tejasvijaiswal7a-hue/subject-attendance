@@ -2,30 +2,43 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { getCurrentUser } from "./users";
 
-/** Default subject list for Heritage Institute of Technology students. */
-const DEFAULT_SUBJECTS: {
+type SubjectSeed = {
   name: string;
   code: string;
-  section: string;
+  category: string;
   order: number;
-}[] = [
-  // Section A
-  { name: "Data Structures", code: "CS 401", section: "Section A", order: 0 },
-  { name: "Formal Language & Automata Theory", code: "CS 402", section: "Section A", order: 1 },
-  { name: "Design & Analysis of Algorithms", code: "CS 403", section: "Section A", order: 2 },
-  { name: "Computer Organization", code: "CS 404", section: "Section A", order: 3 },
-  { name: "Object Oriented Programming", code: "CS 405", section: "Section A", order: 4 },
-  { name: "Discrete Mathematics", code: "M(CS) 402", section: "Section A", order: 5 },
-  // Section B
-  { name: "Operating Systems", code: "CS 501", section: "Section B", order: 0 },
-  { name: "Computer Networks", code: "CS 502", section: "Section B", order: 1 },
-  { name: "Database Management Systems", code: "CS 503", section: "Section B", order: 2 },
-  { name: "Software Engineering", code: "CS 504", section: "Section B", order: 3 },
-  { name: "Theory of Computation", code: "CS 505", section: "Section B", order: 4 },
-  { name: "Numerical Methods", code: "M(CS) 501", section: "Section B", order: 5 },
+};
+
+/**
+ * The exact subject list supplied by the student, in timetable order.
+ * `code` is kept verbatim; `name` is a readable label; `category` groups
+ * lectures, labs, tutorials and non-academic sessions.
+ */
+const DEFAULT_SUBJECTS: SubjectSeed[] = [
+  { name: "Engineering Mechanics", code: "LAB/MEC1052/ABS", category: "Lab", order: 0 },
+  { name: "Engineering Mechanics", code: "LAB/MEC1051/AKR", category: "Lab", order: 1 },
+  { name: "Engineering Physics", code: "L/PHY1001/STM", category: "Lecture", order: 2 },
+  { name: "Humanities", code: "L/HUM1002/SPR", category: "Lecture", order: 3 },
+  { name: "Humanities", code: "L/HUM/1002/KM", category: "Lecture", order: 4 },
+  { name: "Basic Electronics", code: "L/ECE1001/AMD", category: "Lecture", order: 5 },
+  { name: "Engineering Mathematics I", code: "L/MTH1101/SR", category: "Lecture", order: 6 },
+  { name: "Physics Laboratory", code: "LAB/PHY1051/RJR", category: "Lab", order: 7 },
+  { name: "Physics Laboratory", code: "LAB/PHY1051/STM", category: "Lab", order: 8 },
+  { name: "Mentoring", code: "MENTORING", category: "Sessions", order: 9 },
+  { name: "Life Skills", code: "LIFE SKILL", category: "Sessions", order: 10 },
+  { name: "Basic Electronics Laboratory", code: "LAB/ECE1051/AC", category: "Lab", order: 11 },
+  { name: "Basic Electronics Laboratory", code: "LAB/ECE1051/OB", category: "Lab", order: 12 },
+  { name: "Engineering Mathematics I", code: "T1/MTH1101/VB", category: "Tutorial", order: 13 },
+  { name: "Engineering Mechanics", code: "L/MEC1052/MB", category: "Lecture", order: 14 },
+  { name: "Engineering Mechanics", code: "L/MEC1051/AR", category: "Lecture", order: 15 },
+  { name: "Engineering Physics", code: "L/PHY1001/RJR", category: "Lecture", order: 16 },
 ];
 
-/** Insert the default subjects once, on first app load. Idempotent. */
+/**
+ * Insert the default subjects once. If the stored subject set no longer
+ * matches (e.g. an older seed), it is wiped and reseeded so the app always
+ * shows exactly the timetable above. Idempotent.
+ */
 export const ensureDefaultSubjects = mutation({
   args: {},
   handler: async (ctx) => {
@@ -33,9 +46,21 @@ export const ensureDefaultSubjects = mutation({
     if (user === null) {
       throw new Error("Not signed in");
     }
-    const existing = await ctx.db.query("subjects").first();
-    if (existing !== null) {
+    const existing = await ctx.db.query("subjects").collect();
+    const expectedCodes = new Set(DEFAULT_SUBJECTS.map((s) => s.code));
+    const matches =
+      existing.length === DEFAULT_SUBJECTS.length &&
+      existing.every((s) => expectedCodes.has(s.code));
+    if (matches) {
       return;
+    }
+    // Reseed: clear old subjects and any attendance pointing at them.
+    const records = await ctx.db.query("attendance").collect();
+    for (const record of records) {
+      await ctx.db.delete(record._id);
+    }
+    for (const subject of existing) {
+      await ctx.db.delete(subject._id);
     }
     for (const subject of DEFAULT_SUBJECTS) {
       await ctx.db.insert("subjects", subject);
@@ -43,7 +68,22 @@ export const ensureDefaultSubjects = mutation({
   },
 });
 
-/** Subjects with today's status and lifetime stats for the signed-in user. */
+/** Remember which group (A or B) the student belongs to. */
+export const setGroup = mutation({
+  args: { group: v.union(v.literal("A"), v.literal("B")) },
+  handler: async (ctx, { group }) => {
+    const user = await getCurrentUser(ctx);
+    if (user === null) {
+      throw new Error("Not signed in");
+    }
+    await ctx.db.patch(user._id, { group });
+  },
+});
+
+/**
+ * Subjects with today's status, lifetime stats and full history for the
+ * signed-in user, plus their chosen group and overall summary.
+ */
 export const dashboard = query({
   args: { date: v.string() },
   handler: async (ctx, { date }) => {
@@ -52,36 +92,48 @@ export const dashboard = query({
       return null;
     }
 
-    const subjects = await ctx.db.query("subjects").withIndex("by_order").collect();
+    const subjects = await ctx.db
+      .query("subjects")
+      .withIndex("by_order")
+      .collect();
     const records = await ctx.db
       .query("attendance")
       .withIndex("by_user", (q) => q.eq("userId", user._id))
       .collect();
 
-    const todayStatus = new Map<string, "present" | "absent">();
-    const stats = new Map<string, { present: number; total: number }>();
+    const bySubject = new Map<string, { date: string; status: "present" | "absent" }[]>();
     for (const record of records) {
-      const subjectStats = stats.get(record.subjectId) ?? { present: 0, total: 0 };
-      subjectStats.total += 1;
-      if (record.status === "present") {
-        subjectStats.present += 1;
-      }
-      stats.set(record.subjectId, subjectStats);
-      if (record.date === date) {
-        todayStatus.set(record.subjectId, record.status);
-      }
+      const list = bySubject.get(record.subjectId) ?? [];
+      list.push({ date: record.date, status: record.status });
+      bySubject.set(record.subjectId, list);
     }
 
-    return {
-      subjects: subjects.map((subject) => ({
+    let totalMarks = 0;
+    let totalPresent = 0;
+
+    const subjectList = subjects.map((subject) => {
+      const history = (bySubject.get(subject._id) ?? []).sort((a, b) =>
+        a.date < b.date ? 1 : -1,
+      );
+      const present = history.filter((h) => h.status === "present").length;
+      totalMarks += history.length;
+      totalPresent += present;
+      return {
         _id: subject._id,
         name: subject.name,
         code: subject.code,
-        section: subject.section,
-        todayStatus: todayStatus.get(subject._id) ?? null,
-        present: stats.get(subject._id)?.present ?? 0,
-        total: stats.get(subject._id)?.total ?? 0,
-      })),
+        category: subject.category,
+        todayStatus: history.find((h) => h.date === date)?.status ?? null,
+        present,
+        total: history.length,
+        history,
+      };
+    });
+
+    return {
+      group: user.group ?? null,
+      summary: { totalMarks, totalPresent },
+      subjects: subjectList,
     };
   },
 });
